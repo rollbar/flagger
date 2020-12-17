@@ -248,7 +248,15 @@ func (c *Controller) runMetricChecks(canary *flaggerv1.Canary) bool {
 				return false
 			}
 
-			query, err := observers.RenderQuery(template.Spec.Query, toMetricModel(canary, metric.Interval))
+			targetName := canary.Spec.TargetRef.Name
+			dep, err := c.kubeClient.AppsV1().Deployments(canary.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
+			if err != nil {
+				c.recordEventErrorf(canary, "Fetching Deployment target %s.%s for Metric template %s.%s provider %s error: %v",
+					targetName, canary.Namespace, metric.TemplateRef.Name, namespace, template.Spec.Provider.Type, err)
+				return false
+			}
+
+			query, err := observers.RenderQuery(template.Spec.Query, toMetricModel(canary, dep.ObjectMeta, metric.Interval))
 			if err != nil {
 				c.recordEventErrorf(canary, "Metric template %s.%s query render error: %v",
 					metric.TemplateRef.Name, namespace, err)
@@ -289,7 +297,7 @@ func (c *Controller) runMetricChecks(canary *flaggerv1.Canary) bool {
 	return true
 }
 
-func toMetricModel(r *flaggerv1.Canary, interval string) flaggerv1.MetricTemplateModel {
+func toMetricModel(r *flaggerv1.Canary, metadata metav1.ObjectMeta, interval string) flaggerv1.MetricTemplateModel {
 	service := r.Spec.TargetRef.Name
 	if r.Spec.Service.Name != "" {
 		service = r.Spec.Service.Name
@@ -299,11 +307,12 @@ func toMetricModel(r *flaggerv1.Canary, interval string) flaggerv1.MetricTemplat
 		ingress = r.Spec.IngressRef.Name
 	}
 	return flaggerv1.MetricTemplateModel{
-		Name:      r.Name,
-		Namespace: r.Namespace,
-		Target:    r.Spec.TargetRef.Name,
-		Service:   service,
-		Ingress:   ingress,
-		Interval:  interval,
+		Name:               r.Name,
+		Namespace:          r.Namespace,
+		Target:             r.Spec.TargetRef.Name,
+		Service:            service,
+		Ingress:            ingress,
+		Interval:           interval,
+		DeploymentMetadata: metadata,
 	}
 }
